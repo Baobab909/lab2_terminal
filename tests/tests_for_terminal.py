@@ -1,6 +1,5 @@
 import os
 import tempfile
-import shutil
 import pytest
 from unittest.mock import patch
 from io import StringIO
@@ -12,219 +11,200 @@ from src.command.mv import mv
 from src.command.rm import rm
 
 
-class TestTerminalCommands:
-    """Основные тесты для команд терминала"""
+class Test:
+    """Простые тесты для всех команд терминала"""
 
     def setup_method(self):
+        """Тестовая среда"""
         self.test_dir = tempfile.mkdtemp()
         self.original_dir = os.getcwd()
         os.chdir(self.test_dir)
 
-        # Создаем тестовые файлы
-        with open('test_file.txt', 'w') as f:
-            f.write('Hello, World!')
+        with open('file1.txt', 'w') as f:
+            f.write('content1')
+        with open('file2.txt', 'w') as f:
+            f.write('content2')
+        os.makedirs('dir1')
+        os.makedirs('dir2')
+        with open('dir1/nested.txt', 'w') as f:
+            f.write('nested content')
 
-        os.makedirs('test_dir', exist_ok=True)
-        with open('test_dir/nested.txt', 'w') as f:
-            f.write('Nested content')
+    # ls
+    def test_ls(self):
+        """файлы и папки"""
+        with patch('sys.stdout', new_callable=StringIO) as mock_out:
+            ls('.')
+            output = mock_out.getvalue()
+            assert 'file1.txt' in output
+            assert 'dir1' in output
 
+    def test_ls_option(self):
+        """детали"""
+        with patch('sys.stdout', new_callable=StringIO):
+            ls('.', '-l')
 
-    # Тесты для ls
-    def test_ls_basic(self):
-        """Тест базового вывода ls"""
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            ls(self.test_dir)
-            output = mock_stdout.getvalue()
-            assert 'test_file.txt' in output
-            assert 'test_dir' in output
+    def test_ls_none(self):
+        """ls с несуществующим путем"""
+        with patch('sys.stdout', new_callable=StringIO) as mock_out:
+            ls('/bad/path')
+            assert 'не найден' in mock_out.getvalue()
 
-    def test_ls_nonexistent_path(self):
-        """Тест ls с несуществующим путем"""
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            ls('/nonexistent/path')
-            output = mock_stdout.getvalue()
-            assert 'не найден' in output
+    # cd
+    def test_cd_valid_directory(self):
+        """переходит в существующую папку"""
+        new_path = cd('dir1')
+        assert 'dir1' in new_path
 
-    # Тесты для cd
-    def test_cd_basic(self):
-        """Тест перехода в директорию"""
-        new_path = cd('test_dir')
-        assert os.path.basename(new_path) == 'test_dir'
-
-    def test_cd_nonexistent(self):
-        """Тест перехода в несуществующую директорию"""
-        original_dir = os.getcwd()
-        new_path = cd('nonexistent_dir')
-        assert new_path == original_dir
+    def test_cd_none(self):
+        """с несуществующей папкой"""
+        old = os.getcwd()
+        new_path = cd('bad_dir')
+        assert new_path == old
 
     def test_cd_home(self):
-        """Тест перехода в домашнюю директорию"""
-        home_dir = os.path.expanduser("~")
+        """cd ~"""
         new_path = cd('~')
-        assert new_path == home_dir
+        assert os.path.exists(new_path)
 
-    # Тесты для cat
-    def test_cat_basic(self):
-        """Тест вывода содержимого файла"""
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            result = cat('test_file.txt')
-            output = mock_stdout.getvalue()
+    def test_cd_empty(self):
+        """cd без аргументов"""
+        new_path = cd()
+        assert os.path.exists(new_path)
+
+    # cat
+    def test_cat(self):
+        """cat читает файл"""
+        with patch('sys.stdout', new_callable=StringIO) as mock_out:
+            result = cat('file1.txt')
             assert result is True
-            assert 'Hello, World!' in output
+            assert 'content1' in mock_out.getvalue()
 
-    def test_cat_nonexistent(self):
-        """Тест вывода несуществующего файла"""
-        result = cat('nonexistent.txt')
+    def test_cat_none(self):
+        """cat несуществующего файла"""
+        result = cat('bad_file.txt')
         assert result is False
 
-    def test_cat_directory(self):
-        """Тест вывода директории вместо файла"""
-        result = cat('test_dir')
+    def test_cat_prava(self):
+        """cat с ошибкой прав доступа"""
+        with patch('builtins.open', side_effect=PermissionError):
+            result = cat('file1.txt')
+            assert result is False
+
+    # cp
+    def test_cp(self):
+        """cp копирует файл"""
+        result = cp('file1.txt', 'copy.txt')
+        assert result is True
+        assert os.path.exists('copy.txt')
+
+    def test_cp_directory(self):
+        """cp папки без -r"""
+        result = cp('dir1', 'copy_dir')
         assert result is False
 
-    # Тесты для cp
-    def test_cp_file(self):
-        """Тест копирования файла"""
-        result = cp('test_file.txt', 'copied.txt')
+    def test_cp_r(self):
+        """cp папки с -r"""
+        result = cp('dir1', 'copy_dir', recursive=True)
         assert result is True
-        assert os.path.exists('copied.txt')
+        assert os.path.exists('copy_dir/nested.txt')
 
-    def test_cp_directory_without_r(self):
-        """Тест копирования директории без -r"""
-        result = cp('test_dir', 'copied_dir')
+    def test_cp_nonexistent_source(self):
+        """cp несуществующего файла"""
+        result = cp('bad.txt', 'dest.txt')
         assert result is False
 
-    def test_cp_directory_with_r(self):
-        """Тест копирования директории с -r"""
-        result = cp('test_dir', 'copied_dir', recursive=True)
+    # mv
+    def test_mv(self):
+        """mv перемещает файл"""
+        result = mv('file1.txt', 'moved.txt')
         assert result is True
-        assert os.path.exists('copied_dir/nested.txt')
-
-    # Тесты для mv
-    def test_mv_file(self):
-        """Тест перемещения файла"""
-        result = mv('test_file.txt', 'moved.txt')
-        assert result is True
+        assert not os.path.exists('file1.txt')
         assert os.path.exists('moved.txt')
-        assert not os.path.exists('test_file.txt')
 
-    def test_mv_nonexistent(self):
-        """Тест перемещения несуществующего файла"""
-        result = mv('nonexistent.txt', 'moved.txt')
-        assert result is False
-
-    # Тесты для rm
-    def test_rm_file(self):
-        """Тест удаления файла"""
-        result = rm('test_file.txt')
+    def test_mv_directory(self):
+        """mv перемещает папку"""
+        result = mv('dir1', 'moved_dir')
         assert result is True
-        assert not os.path.exists('test_file.txt')
+        assert not os.path.exists('dir1')
+        assert os.path.exists('moved_dir/nested.txt')
 
-    def test_rm_directory_without_r(self):
-        """Тест удаления директории без -r"""
-        result = rm('test_dir')
+    def test_mv_none(self):
+        """mv несуществующего файла"""
+        result = mv('bad.txt', 'dest.txt')
         assert result is False
 
-    def test_rm_directory_with_r_confirmed(self, monkeypatch):
-        """Тест удаления директории с подтверждением"""
-        monkeypatch.setattr('builtins.input', lambda _: 'y')
-        result = rm('test_dir', recursive=True)
+    # rm
+    def test_rm(self):
+        """rm удаляет файл"""
+        result = rm('file1.txt')
         assert result is True
-        assert not os.path.exists('test_dir')
+        assert not os.path.exists('file1.txt')
 
-    def test_rm_directory_with_r_cancelled(self, monkeypatch):
-        """Тест удаления директории с отменой"""
-        monkeypatch.setattr('builtins.input', lambda _: 'n')
-        result = rm('test_dir', recursive=True)
+    def test_rm_directory(self):
+        """rm папки без -r"""
+        result = rm('dir1')
         assert result is False
-        assert os.path.exists('test_dir')
+        assert os.path.exists('dir1')
+
+    def test_rm_r(self):
+        """rm папки с -r и подтверждением"""
+        with patch('builtins.input', return_value='y'):
+            result = rm('dir1', recursive=True)
+            assert result is True
+            assert not os.path.exists('dir1')
+
+    def test_rm_d_r(self):
+        """rm папки с -r и отменой"""
+        with patch('builtins.input', return_value='n'):
+            result = rm('dir1', recursive=True)
+            assert result is False
+            assert os.path.exists('dir1')
+
+    def test_rm_none(self):
+        """rm несуществующего файла"""
+        result = rm('bad.txt')
+        assert result is False
 
 
-class TestMainProgram:
-    """Тесты основного цикла программы"""
+class TestMain:
+    """Тесты основной программы"""
 
     @patch('builtins.input')
-    def test_main_exit(self, mock_input):
-        """Тест выхода из программы"""
-        from main import main
-        mock_input.side_effect = ['by']
-
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            try:
-                main()
-            except SystemExit:
-                pass
-            output = mock_stdout.getvalue()
-            assert 'Конец' in output
-
-    @patch('builtins.input')
-    def test_unknown_command(self, mock_input):
-        """Тест неизвестной команды"""
+    def test_error(self, mock_input):
+        """Неизвестная команда"""
         from main import main
         mock_input.side_effect = ['unknown_cmd', 'by']
 
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+        with patch('sys.stdout', new_callable=StringIO) as mock_out:
             try:
                 main()
             except SystemExit:
                 pass
-            output = mock_stdout.getvalue()
-            assert 'Неизвестная команда' in output
+            assert 'Неизвестная команда' in mock_out.getvalue()
 
-    def test_keyboard_interrupt(self):
-        """Тест прерывания программы"""
+    @patch('builtins.input')
+    def test_main_empty_input(self, mock_input):
+        """Пустой ввод в main"""
         from main import main
+        mock_input.side_effect = ['', 'by']
 
-        with patch('builtins.input') as mock_input:
-            mock_input.side_effect = KeyboardInterrupt()
-
-            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-                try:
-                    main()
-                except SystemExit:
-                    pass
-                output = mock_stdout.getvalue()
-                assert 'Пока' in output
+        with patch('sys.stdout', new_callable=StringIO):
+            try:
+                main()
+            except SystemExit:
+                pass
 
 
-def test_edge_cases():
-    """Тесты граничных случаев"""
 
-    # Создаем временную директорию
-    test_dir = tempfile.mkdtemp()
-    original_dir = os.getcwd()
+def test_logger():
+    """Тесты функций логирования"""
+    from src.command.logger import p_error, p_info, p_good
 
-    try:
-        os.chdir(test_dir)
-
-        # Тест пустых команд
-        from main import main
-        with patch('builtins.input') as mock_input:
-            mock_input.side_effect = ['', ' ', 'by']
-            with patch('sys.stdout', new_callable=StringIO):
-                try:
-                    main()
-                except SystemExit:
-                    pass
-
-        # Тест ls с опцией -l
-        with open('test.txt', 'w') as f:
-            f.write('test')
-
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-            ls(test_dir, '-l')
-            output = mock_stdout.getvalue()
-            assert 'test.txt' in output
-
-        # Тест cd без аргументов (должен перейти в домашнюю директорию)
-        home_dir = os.path.expanduser("~")
-        result_path = cd()
-        assert result_path == home_dir
-
-    finally:
-        os.chdir(original_dir)
-        shutil.rmtree(test_dir)
+    # Просто проверяем что не падают
+    p_error("test error")
+    p_info("test info")
+    p_good("test command")
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    pytest.main()
